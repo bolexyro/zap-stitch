@@ -6,6 +6,7 @@ export interface BankAccount {
   accountNumber: string;
   color: string;
   icon: string; // Lucide icon name
+  logoUrl?: string;
 }
 
 export interface Recipient {
@@ -21,16 +22,13 @@ export type SessionState =
   | "collected"
   | "disbursing"
   | "success"
-  | "partial_failure"
-  | "ghost_transaction"
-  | "race_condition"
-  | "refund_failure";
+  | "partial_failure";
 
 export interface TransactionLeg {
   id: string;
   sourceAccountId: string;
   amount: number;
-  status: "pending" | "success" | "failed" | "refunded" | "ghost";
+  status: "pending" | "success" | "failed" | "refunded";
 }
 
 export interface StitchSession {
@@ -44,7 +42,4 @@ export interface StitchSession {
 
 export type SimulationScenario =
   | "success"
-  | "partial_failure"
-  | "ghost_transaction"
-  | "race_condition"
-  | "refund_failure";
+  | "partial_failure";

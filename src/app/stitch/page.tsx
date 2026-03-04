@@ -15,6 +15,7 @@ export default function StitchPage() {
     const [recipientId, setRecipientId] = useState("");
     const [scenario, setScenario] = useState<SimulationScenario>("success");
     const [animationKey, setAnimationKey] = useState(0);
+    const [parallel, setParallel] = useState(true);
 
     const handleConfirm = useCallback(
         (amount: number, allocs: Record<string, number>, recipient: string) => {
@@ -38,9 +39,17 @@ export default function StitchPage() {
         []
     );
 
+    const handleParallelChange = useCallback(
+        (newParallel: boolean) => {
+            setParallel(newParallel);
+            setAnimationKey((k) => k + 1);
+        },
+        []
+    );
+
     return (
         <div className="min-h-screen">
-            <div className="mx-auto max-w-5xl px-6 py-16">
+            <div className="mx-auto max-w-6xl px-6 py-16">
                 {/* Header */}
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
@@ -52,7 +61,7 @@ export default function StitchPage() {
                         {phase === "visualize" && (
                             <button
                                 onClick={() => setPhase("form")}
-                                className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-surface-hover transition-colors"
+                                className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
                             >
                                 <ArrowLeft className="w-4 h-4" />
                             </button>
@@ -87,24 +96,25 @@ export default function StitchPage() {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6"
+                            className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-8"
                         >
                             {/* Visualization */}
-                            <div className="min-h-[500px]">
-                                <MoneyFlowVisualization
-                                    key={animationKey}
-                                    targetAmount={targetAmount}
-                                    allocations={allocations}
-                                    recipientId={recipientId}
-                                    scenario={scenario}
-                                />
-                            </div>
+                            <MoneyFlowVisualization
+                                key={animationKey}
+                                targetAmount={targetAmount}
+                                allocations={allocations}
+                                recipientId={recipientId}
+                                scenario={scenario}
+                                parallel={parallel}
+                            />
 
                             {/* State Handler Sidebar */}
                             <StateHandler
                                 scenario={scenario}
                                 onScenarioChange={handleScenarioChange}
                                 onReplay={handleReplay}
+                                parallel={parallel}
+                                onParallelChange={handleParallelChange}
                             />
                         </motion.div>
                     )}

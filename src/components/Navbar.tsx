@@ -2,12 +2,11 @@
 
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { FileText, Layers, LayoutDashboard, Zap } from "lucide-react";
+import { FileText, Layers, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
-    { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/stitch", label: "Stitch", icon: Zap },
     { href: "/docs", label: "Docs", icon: FileText },
 ];
@@ -19,7 +18,7 @@ export default function Navbar() {
         <nav className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-xl">
             <div className="mx-auto max-w-5xl flex items-center justify-between px-6 h-14">
                 {/* Logo */}
-                <Link href="/" className="flex items-center gap-2.5 group">
+                <Link href="/stitch" className="flex items-center gap-2.5 group">
                     <div className="relative w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center border border-primary/10 group-hover:border-primary/20 transition-colors">
                         <Layers className="w-4 h-4 text-primary" />
                     </div>

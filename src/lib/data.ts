@@ -9,6 +9,7 @@ export const bankAccounts: BankAccount[] = [
     accountNumber: "****4821",
     color: "#0055FF",
     icon: "Wallet",
+    logoUrl: "https://ykgqfhxtwbbpjpcbayeg.supabase.co/storage/v1/object/public/Bnk%20Images/moniepoint-logo.png",
   },
   {
     id: "opay",
@@ -18,6 +19,7 @@ export const bankAccounts: BankAccount[] = [
     accountNumber: "****7392",
     color: "#1DC26F",
     icon: "Smartphone",
+    logoUrl: "https://ykgqfhxtwbbpjpcbayeg.supabase.co/storage/v1/object/public/Bnk%20Images/opay-logo.png",
   },
   {
     id: "kuda",
@@ -27,6 +29,7 @@ export const bankAccounts: BankAccount[] = [
     accountNumber: "****1156",
     color: "#7B2AE0",
     icon: "CreditCard",
+    logoUrl: "https://ykgqfhxtwbbpjpcbayeg.supabase.co/storage/v1/object/public/Bnk%20Images/kuda.png",
   },
   {
     id: "access",
@@ -36,6 +39,7 @@ export const bankAccounts: BankAccount[] = [
     accountNumber: "****6038",
     color: "#F47920",
     icon: "Building2",
+    logoUrl: "https://ykgqfhxtwbbpjpcbayeg.supabase.co/storage/v1/object/public/Bnk%20Images/access.png",
   },
   {
     id: "gtbank",
@@ -45,6 +49,7 @@ export const bankAccounts: BankAccount[] = [
     accountNumber: "****9514",
     color: "#E44311",
     icon: "Landmark",
+    logoUrl: "https://ykgqfhxtwbbpjpcbayeg.supabase.co/storage/v1/object/public/Bnk%20Images/gtb-logo.png",
   },
 ];
 

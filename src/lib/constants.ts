@@ -16,27 +16,12 @@ export const PAYSTACK = {
 export const SCENARIO_LABELS: Record<string, { label: string; description: string; emoji: string }> = {
   success: {
     label: "Success",
-    description: "All legs succeed. Funds consolidate and disburse.",
+    description: "All legs succeed.",
     emoji: "✅",
   },
   partial_failure: {
     label: "Partial Failure",
-    description: "One leg fails. Successful legs auto-refund.",
+    description: "One or more legs fail.",
     emoji: "⚠️",
-  },
-  ghost_transaction: {
-    label: "Ghost Transaction",
-    description: "Late arrival after session expired. Auto-reversed.",
-    emoji: "👻",
-  },
-  race_condition: {
-    label: "Race Condition",
-    description: "Balance drops before execution completes.",
-    emoji: "🏎️",
-  },
-  refund_failure: {
-    label: "Refund Failure",
-    description: "Refund blocked. Funds held in Stitch Escrow.",
-    emoji: "🔒",
   },
 };

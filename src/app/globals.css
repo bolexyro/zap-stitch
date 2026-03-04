@@ -95,8 +95,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Remove shadows from shadcn cards */
-[data-slot="card"] {
+/* Global Shadow Removal */
+* {
   box-shadow: none !important;
 }
 

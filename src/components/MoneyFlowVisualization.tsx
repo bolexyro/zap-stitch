@@ -5,21 +5,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SCENARIO_LABELS } from "@/lib/constants";
 import { bankAccounts, formatNaira, sampleRecipients } from "@/lib/data";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface VisualizationProps {
     targetAmount: number;
     allocations: Record<string, number>;
     recipientId: string;
     scenario: string;
+    parallel?: boolean;
 }
 
-// Phase definitions for storytelling
 type Phase =
     | "intro"
-    | "collecting"
     | "leg_progress"
-    | "buffer_filling"
     | "buffer_full"
     | "disbursing"
     | "complete"
@@ -27,122 +25,156 @@ type Phase =
     | "refunding"
     | "refund_done"
     | "ghost_arriving"
-    | "ghost_reversed"
-    | "race_failed"
-    | "escrow_held";
+    | "ghost_landed"
+    | "ghost_reversed";
 
 interface PhaseInfo {
+    step: number;
     label: string;
     description: string;
 }
 
 const PHASE_TEXT: Record<string, PhaseInfo> = {
     intro: {
+        step: 1,
         label: "Initiating Stitch",
         description: "Preparing to collect funds from your linked accounts...",
     },
-    collecting: {
-        label: "Collecting Funds",
-        description:
-            "Pulling money from each source account into the Paystack Virtual Account.",
-    },
     leg_progress: {
+        step: 2,
         label: "Transfer in Progress",
         description: "Each bank is processing its transfer to the virtual account.",
     },
-    buffer_filling: {
-        label: "Virtual Account Receiving",
-        description:
-            "The Paystack buffer is receiving funds. Waiting for all legs to complete.",
-    },
     buffer_full: {
+        step: 3,
         label: "All Funds Collected ✓",
         description:
             "The virtual account has received the full target amount. Ready to disburse.",
     },
     disbursing: {
+        step: 4,
         label: "Disbursing Payment",
         description:
             "Sending the full amount as a single, clean transfer to the recipient.",
     },
     complete: {
+        step: 5,
         label: "Payment Complete ✓",
         description:
-            "The recipient received one alert for the full amount. Clean and professional.",
+            "The recipient received one alert for the full amount.",
     },
     leg_failed: {
+        step: 3,
         label: "Transfer Failed ✗",
         description:
-            "One of the source transfers failed. The session cannot be completed.",
+            "One of the transfers failed.",
     },
     refunding: {
+        step: 4,
         label: "Auto-Refunding",
         description:
             "Stitch is returning the successful transfers back to their source accounts.",
     },
     refund_done: {
+        step: 4,
         label: "Refund Complete",
         description: "All funds have been safely returned to their original accounts.",
     },
     ghost_arriving: {
+        step: 5,
         label: "Stale Fund Detected ⚠",
         description:
-            "A delayed transfer just arrived after the session expired. Auto-reversing...",
+            "A delayed transfer is arriving after the session expired...",
+    },
+    ghost_landed: {
+        step: 6,
+        label: "Unauthorized Fund in Buffer ⚠",
+        description:
+            "The late transfer has entered the buffer. Auto-reversing now...",
     },
     ghost_reversed: {
+        step: 7,
         label: "Ghost Reversed",
         description:
             "The late-arriving funds were automatically sent back. Ledger is clean.",
     },
-    race_failed: {
-        label: "Insufficient Balance ✗",
-        description:
-            "A source balance changed between allocation and execution. Transfer rejected.",
-    },
-    escrow_held: {
-        label: "Funds in Escrow 🔒",
-        description:
-            "Refund to source failed. Funds are held safely in Stitch Escrow.",
-    },
 };
+
+type LegStatus = "pending" | "sending" | "done" | "failed" | "refunding" | "refunded";
 
 export default function MoneyFlowVisualization({
     targetAmount,
     allocations,
     recipientId,
     scenario,
+    parallel = true,
 }: VisualizationProps) {
     const [phase, setPhase] = useState<Phase>("intro");
-    const [activeLeg, setActiveLeg] = useState(-1);
     const [collectedAmount, setCollectedAmount] = useState(0);
-    const [legStatuses, setLegStatuses] = useState<
-        Record<number, "pending" | "sending" | "done" | "failed" | "refunding" | "refunded" | "ghost">
-    >({});
-    // Track bank colors that have deposited into the buffer (for fill layers)
+    const [legStatuses, setLegStatuses] = useState<Record<number, LegStatus>>({});
     const [bufferColors, setBufferColors] = useState<{ color: string; amount: number }[]>([]);
-    // Track active money packets for animation
-    const [packets, setPackets] = useState<
-        { id: string; direction: "to-buffer" | "to-recipient" | "refund"; legIndex: number; color: string }[]
-    >([]);
+    const [disbursing, setDisbursing] = useState(false);
 
-    const activeSources = Object.entries(allocations)
-        .filter(([_, amt]) => amt > 0)
-        .map(([id, amt]) => {
-            const account = bankAccounts.find((a) => a.id === id)!;
-            return { account, amount: amt };
-        });
+    const activeSources = useMemo(
+        () =>
+            Object.entries(allocations)
+                .filter(([_, amt]) => amt > 0)
+                .map(([id, amt]) => {
+                    const account = bankAccounts.find((a) => a.id === id)!;
+                    return { account, amount: amt };
+                }),
+        [allocations]
+    );
 
     const recipient = sampleRecipients.find((r) => r.id === recipientId)!;
 
     const isSuccess = scenario === "success";
     const isPartialFail = scenario === "partial_failure";
-    const isGhost = scenario === "ghost_transaction";
-    const isRace = scenario === "race_condition";
-    const isRefundFail = scenario === "refund_failure";
 
-    const failingLegIndex = activeSources.length - 1;
+    const failingLegIndices = useMemo(() => {
+        if (!isPartialFail || activeSources.length === 0) return [];
+        // Math.random to pick a number of failed legs between 1 and activeSources.length
+        const numToFail = Math.floor(Math.random() * activeSources.length) + 1;
+        // Shuffle indices and pick `numToFail`
+        const indices = Array.from({ length: activeSources.length }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        return indices.slice(0, numToFail);
+    }, [isPartialFail, activeSources.length, scenario]);
 
-    // ── Orchestrate the phases ──────────────────────
+    // ─── SVG Layout ──────────────────────────────
+    const cardW = 170;
+    const cardH = 62;
+    const destCardW = 200;
+    const svgW = 920;
+    const svgH = Math.max(activeSources.length * 90 + 60, 320);
+    const srcX = cardW / 2 + 16;
+    const bufX = svgW / 2;
+    const bufY = svgH / 2;
+    const bufR = 76;
+    const destX = svgW - destCardW / 2 - 16;
+    const destY = bufY;
+
+    const sourcePositions = activeSources.map((_, i) => ({
+        x: srcX,
+        y: (i + 1) * (svgH / (activeSources.length + 1)),
+    }));
+
+    // Smooth cubic bezier from source card right edge → buffer left edge
+    const getSourcePath = (i: number) => {
+        const s = sourcePositions[i];
+        const startX = s.x + cardW / 2 + 6;
+        const endX = bufX - bufR - 6;
+        const midX = (startX + endX) / 2;
+        return `M ${startX} ${s.y} C ${midX} ${s.y}, ${midX} ${bufY}, ${endX} ${bufY}`;
+    };
+
+    // Straight line from buffer → destination card
+    const destPath = `M ${bufX + bufR + 6} ${bufY} L ${destX - destCardW / 2 - 6} ${bufY}`;
+
+    // ─── Orchestrate phases ──────────────────────
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
         let elapsed = 0;
@@ -154,705 +186,474 @@ export default function MoneyFlowVisualization({
 
         // Reset
         setPhase("intro");
-        setActiveLeg(-1);
         setCollectedAmount(0);
         setLegStatuses({});
         setBufferColors([]);
-        setPackets([]);
+        setDisbursing(false);
 
-        // Intro
-        after(1500, () => setPhase("collecting"));
-
-        // Process each leg one by one
-        activeSources.forEach((source, i) => {
-            // Mark as sending + launch packet
-            after(1200, () => {
-                setActiveLeg(i);
-                setLegStatuses((prev) => ({ ...prev, [i]: "sending" }));
-                setPhase("leg_progress");
-                setPackets((prev) => [
-                    ...prev,
-                    { id: `to-${i}`, direction: "to-buffer", legIndex: i, color: source.account.color },
-                ]);
-            });
-
-            // Check scenario-specific behavior
-            if (isPartialFail && i === failingLegIndex) {
-                // This leg fails
-                after(2000, () => {
-                    setLegStatuses((prev) => ({ ...prev, [i]: "failed" }));
-                    setPhase("leg_failed");
-                });
-            } else if (isRace && i === 0) {
-                // Race condition on first leg
-                after(2000, () => {
-                    setLegStatuses((prev) => ({ ...prev, [i]: "failed" }));
-                    setPhase("race_failed");
-                });
-            } else if (isGhost && i === failingLegIndex) {
-                // Ghost leg — appears to fail, arrives later
-                after(2000, () => {
-                    setLegStatuses((prev) => ({ ...prev, [i]: "failed" }));
-                    setPhase("leg_failed");
-                });
-            } else {
-                // Success — add bank color to buffer
-                after(2500, () => {
-                    setLegStatuses((prev) => ({ ...prev, [i]: "done" }));
-                    setCollectedAmount((prev) => prev + source.amount);
-                    setBufferColors((prev) => [...prev, { color: source.account.color, amount: source.amount }]);
-                    setPackets((prev) => prev.filter((p) => p.id !== `to-${i}`));
-                    setPhase("buffer_filling");
+        after(2500, () => {
+            if (parallel) {
+                activeSources.forEach((_, i) => {
+                    setLegStatuses((prev) => ({ ...prev, [i]: "sending" }));
                 });
             }
+            setPhase("leg_progress");
         });
 
-        // After all legs processed, what happens next?
-        if (isSuccess) {
-            after(1500, () => setPhase("buffer_full"));
-            after(2000, () => {
-                setPhase("disbursing");
-                setPackets((prev) => [
-                    ...prev,
-                    { id: "disburse", direction: "to-recipient", legIndex: -1, color: "#0ba4db" },
-                ]);
+        if (parallel) {
+
+            let maxDuration = 0;
+            activeSources.forEach((source, i) => {
+                // Slower stagger so each leg lands visibly
+                const durationMs = 3000 + i * 1200;
+                maxDuration = Math.max(maxDuration, durationMs);
+
+                if (isPartialFail && failingLegIndices.includes(i)) {
+                    timers.push(
+                        setTimeout(() => {
+                            setLegStatuses((prev) => ({ ...prev, [i]: "failed" }));
+                            setPhase("leg_failed");
+                        }, elapsed + durationMs)
+                    );
+                } else {
+                    timers.push(
+                        setTimeout(() => {
+                            setLegStatuses((prev) => ({ ...prev, [i]: "done" }));
+                            setCollectedAmount((prev) => prev + source.amount);
+                            setBufferColors((prev) => [...prev, { color: source.account.color, amount: source.amount }]);
+                        }, elapsed + durationMs)
+                    );
+                }
             });
+            elapsed += maxDuration + 800;
+        } else {
+            // ── SEQUENTIAL MODE
+            activeSources.forEach((source, i) => {
+                const durationMs = 3000;
+                after(1500, () => {
+                    setLegStatuses((prev) => ({ ...prev, [i]: "sending" }));
+                });
+
+                if (isPartialFail && failingLegIndices.includes(i)) {
+                    after(durationMs, () => {
+                        setLegStatuses((prev) => ({ ...prev, [i]: "failed" }));
+                        setPhase("leg_failed");
+                    });
+                } else {
+                    after(durationMs, () => {
+                        setLegStatuses((prev) => ({ ...prev, [i]: "done" }));
+                        setCollectedAmount((prev) => prev + source.amount);
+                        setBufferColors((prev) => [...prev, { color: source.account.color, amount: source.amount }]);
+                    });
+                }
+            });
+        }
+
+        // ── Post-collection outcomes ──
+        if (isSuccess) {
+            after(2500, () => setPhase("buffer_full"));
             after(3000, () => {
+                setPhase("disbursing");
+                setDisbursing(true);
+            });
+            after(5000, () => {
                 setPhase("complete");
-                setPackets([]);
+                setDisbursing(false);
             });
         } else if (isPartialFail) {
-            // Refund the successful legs
-            after(2000, () => {
+            after(3000, () => {
                 setPhase("refunding");
-                setPackets([]);
-                activeSources.forEach((source, i) => {
-                    if (i !== failingLegIndex) {
+                activeSources.forEach((_, i) => {
+                    if (!failingLegIndices.includes(i)) {
                         setLegStatuses((prev) => ({ ...prev, [i]: "refunding" }));
-                        setPackets((prev) => [
-                            ...prev,
-                            { id: `refund-${i}`, direction: "refund", legIndex: i, color: source.account.color },
-                        ]);
                     }
                 });
             });
-            after(3000, () => {
+            after(4000, () => {
                 setPhase("refund_done");
-                setPackets([]);
                 activeSources.forEach((_, i) => {
-                    if (i !== failingLegIndex) {
+                    if (!failingLegIndices.includes(i)) {
                         setLegStatuses((prev) => ({ ...prev, [i]: "refunded" }));
                     }
                 });
                 setCollectedAmount(0);
                 setBufferColors([]);
             });
-        } else if (isGhost) {
-            // Refund successful legs first
-            after(2000, () => {
-                setPhase("refunding");
-                setPackets([]);
-                activeSources.forEach((source, i) => {
-                    if (i !== failingLegIndex) {
-                        setLegStatuses((prev) => ({ ...prev, [i]: "refunding" }));
-                        setPackets((prev) => [
-                            ...prev,
-                            { id: `refund-${i}`, direction: "refund" as const, legIndex: i, color: source.account.color },
-                        ]);
-                    }
-                });
-            });
-            after(3000, () => {
-                setPackets([]);
-                activeSources.forEach((_, i) => {
-                    if (i !== failingLegIndex) {
-                        setLegStatuses((prev) => ({ ...prev, [i]: "refunded" }));
-                    }
-                });
-                setCollectedAmount(0);
-                setBufferColors([]);
-                setPhase("refund_done");
-            });
-            // Ghost arrives late
-            after(3000, () => {
-                setLegStatuses((prev) => ({ ...prev, [failingLegIndex]: "ghost" }));
-                setPhase("ghost_arriving");
-            });
-            after(3000, () => {
-                setLegStatuses((prev) => ({ ...prev, [failingLegIndex]: "refunded" }));
-                setPackets([]);
-                setPhase("ghost_reversed");
-            });
-        } else if (isRace) {
-            // Refund any legs that succeeded before the race condition
-            after(2000, () => {
-                setPhase("refunding");
-                setPackets([]);
-                activeSources.forEach((source, i) => {
-                    if (legStatuses[i] === "done" || i !== 0) {
-                        // Refund the non-failed legs
-                        setLegStatuses((prev) => {
-                            if (prev[i] === "done") return { ...prev, [i]: "refunding" };
-                            return prev;
-                        });
-                        setPackets((prev) => [
-                            ...prev,
-                            { id: `refund-${i}`, direction: "refund", legIndex: i, color: source.account.color },
-                        ]);
-                    }
-                });
-            });
-            after(3000, () => {
-                setPhase("refund_done");
-                setPackets([]);
-                activeSources.forEach((_, i) => {
-                    setLegStatuses((prev) => {
-                        if (prev[i] === "refunding") return { ...prev, [i]: "refunded" };
-                        return prev;
-                    });
-                });
-                setCollectedAmount(0);
-                setBufferColors([]);
-            });
-        } else if (isRefundFail) {
-            // All legs send, then refund fails
-            after(1500, () => setPhase("leg_failed"));
-            after(2000, () => {
-                setPhase("refunding");
-                activeSources.forEach((_, i) => {
-                    setLegStatuses((prev) => ({ ...prev, [i]: "refunding" }));
-                });
-            });
-            after(3000, () => setPhase("escrow_held"));
         }
 
         return () => timers.forEach(clearTimeout);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scenario, JSON.stringify(allocations)]);
+    }, [scenario, parallel, JSON.stringify(allocations)]);
 
-    // ── Layout ──────────────────────
-    const fillPercent = targetAmount > 0 ? Math.min(collectedAmount / targetAmount, 1) : 0;
-    const phaseInfo = PHASE_TEXT[phase] || PHASE_TEXT.intro;
+    // ─── Helpers ──────────────────────────────────
+    let phaseInfo = { ...(PHASE_TEXT[phase] || PHASE_TEXT.intro) };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case "done":
-                return "text-green-600";
-            case "failed":
-                return "text-red-500";
-            case "sending":
-                return "text-blue-500";
-            case "refunding":
-                return "text-amber-500";
-            case "refunded":
-                return "text-muted-foreground";
-            case "ghost":
-                return "text-purple-500";
-            default:
-                return "text-muted-foreground";
-        }
+    if (phase === "leg_failed" && failingLegIndices.length > 0) {
+        const c = failingLegIndices.length;
+        phaseInfo.description = `${c} transfer${c > 1 ? "s" : ""} failed.`;
+    }
+
+    const getStatusColor = (status: LegStatus) => {
+        const map: Record<LegStatus, string> = {
+            pending: "#a1a1aa",
+            sending: "#3b82f6",
+            done: "#16a34a",
+            failed: "#ef4444",
+            refunding: "#f59e0b",
+            refunded: "#a1a1aa",
+        };
+        return map[status] || "#a1a1aa";
     };
 
-    const getStatusLabel = (status: string) => {
-        switch (status) {
-            case "pending":
-                return "Waiting...";
-            case "sending":
-                return "Sending →";
-            case "done":
-                return "Received ✓";
-            case "failed":
-                return "Failed ✗";
-            case "refunding":
-                return "Refunding ←";
-            case "refunded":
-                return "Returned ↩";
-            case "ghost":
-                return "Late arrival 👻";
-            default:
-                return "";
-        }
+    const getStatusLabel = (status: LegStatus) => {
+        const map: Record<LegStatus, string> = {
+            pending: "Pending",
+            sending: "Sending",
+            done: "Received ✓",
+            failed: "Failed ✗",
+            refunding: "Refunding",
+            refunded: "Returned ↩",
+        };
+        return map[status];
     };
 
-    const getBufferBorderColor = () => {
-        if (phase === "complete" || phase === "buffer_full") return "border-green-500";
-        if (phase === "leg_failed" || phase === "race_failed") return "border-red-400";
-        if (phase === "escrow_held") return "border-amber-500";
-        if (phase === "ghost_arriving") return "border-purple-400";
-        return "border-[#0ba4db]";
+    const getPathStroke = (status: LegStatus | undefined) => {
+        if (!status || status === "pending") return "var(--color-border)";
+        if (status === "done") return "#16a34a";
+        if (status === "sending") return "#3b82f6";
+        if (status === "failed") return "#ef4444";
+        if (status === "refunding" || status === "refunded") return "#f59e0b";
+        return "var(--color-border)";
     };
-
-    // We no longer use a single background color — we stack colored layers
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             {/* ── Narration Banner ── */}
-            <Card className="overflow-hidden">
-                <CardContent className="pt-5 pb-5">
+            <Card>
+                <CardContent className="py-4">
                     <div className="flex items-center gap-4">
-                        <div className="shrink-0">
-                            <Badge
-                                variant="secondary"
-                                className="text-xs px-2.5 py-1 font-mono"
-                            >
-                                {SCENARIO_LABELS[scenario].emoji} {SCENARIO_LABELS[scenario].label}
-                            </Badge>
+                        <Badge variant="secondary" className="text-xs px-2.5 py-1 font-mono shrink-0">
+                            {SCENARIO_LABELS[scenario].emoji} {SCENARIO_LABELS[scenario].label}
+                        </Badge>
+                        <div className="h-6 w-px bg-border shrink-0" />
+                        <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                            {phaseInfo.step}
                         </div>
-                        <div className="h-8 w-px bg-border shrink-0" />
                         <AnimatePresence mode="wait">
                             <motion.div
                                 key={phase}
                                 initial={{ opacity: 0, y: 8 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -8 }}
-                                transition={{ duration: 0.3 }}
+                                transition={{ duration: 0.4 }}
                                 className="flex-1 min-w-0"
                             >
-                                <p className="text-sm font-semibold">{phaseInfo.label}</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {phaseInfo.description}
-                                </p>
+                                <p className="text-sm font-semibold leading-tight">{phaseInfo.label}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{phaseInfo.description}</p>
                             </motion.div>
                         </AnimatePresence>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* ── Main Visualization ── */}
+            {/* ── SVG Visualization ── */}
             <Card>
-                <CardContent className="pt-8 pb-8">
-                    <div className="flex items-center justify-between gap-6">
-                        {/* SOURCE ACCOUNTS (LEFT) */}
-                        <div className="flex flex-col gap-3 shrink-0 w-44">
-                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1">
-                                Sources
-                            </p>
-                            {activeSources.map((source, i) => {
-                                const status = legStatuses[i] || "pending";
-                                return (
-                                    <motion.div
-                                        key={source.account.id}
-                                        initial={{ opacity: 0, x: -10 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: 0.1 * i }}
-                                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-all ${activeLeg === i
-                                            ? "border-primary bg-primary/5"
-                                            : "border-border"
-                                            }`}
-                                    >
-                                        <span
-                                            className="w-3 h-3 rounded-full shrink-0"
-                                            style={{ backgroundColor: source.account.color }}
-                                        />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-semibold truncate">
-                                                {source.account.name}
-                                            </p>
-                                            <p className="text-[10px] text-muted-foreground">
-                                                {formatNaira(source.amount)}
-                                            </p>
-                                        </div>
+                <CardContent className="py-6 px-4">
+                    <svg
+                        viewBox={`0 0 ${svgW} ${svgH}`}
+                        className="w-full h-auto"
+                        style={{ maxHeight: "560px" }}
+                    >
+                        <defs>
+                            <clipPath id="bufferClip">
+                                <circle cx={bufX} cy={bufY} r={bufR - 2} />
+                            </clipPath>
+                        </defs>
 
-                                        {/* Status indicator */}
-                                        {status !== "pending" && (
-                                            <motion.span
-                                                initial={{ opacity: 0, scale: 0.8 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                className={`text-[10px] font-semibold shrink-0 ${getStatusColor(status)}`}
-                                            >
-                                                {getStatusLabel(status)}
-                                            </motion.span>
-                                        )}
-                                    </motion.div>
-                                );
-                            })}
-                        </div>
-
-                        {/* FLOW ARROWS + VIRTUAL ACCOUNT (CENTER) */}
-                        <div className="flex-1 flex flex-col items-center gap-4 min-w-0">
-                            {/* Arrow from sources → buffer with moving packets */}
-                            <div className="flex items-center gap-2 w-full max-w-xs relative">
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
-                                <motion.div
+                        {/* ── Paths from sources to buffer ── */}
+                        {activeSources.map((_, i) => {
+                            const status = legStatuses[i];
+                            return (
+                                <motion.path
+                                    key={`path-${i}`}
+                                    d={getSourcePath(i)}
+                                    fill="none"
+                                    stroke={getPathStroke(status)}
+                                    strokeWidth="1.5"
+                                    strokeDasharray={status === "sending" ? "6 4" : status === "done" ? "none" : "4 4"}
+                                    initial={{ pathLength: 0, opacity: 0.3 }}
                                     animate={{
-                                        x:
-                                            phase === "collecting" || phase === "leg_progress" || phase === "buffer_filling"
-                                                ? [0, 8, 0]
-                                                : 0,
+                                        pathLength: 1,
+                                        opacity: status === "pending" ? 0.3 : 1,
                                     }}
-                                    transition={{
-                                        repeat:
-                                            phase === "collecting" || phase === "leg_progress" || phase === "buffer_filling"
-                                                ? Infinity
-                                                : 0,
-                                        duration: 1.5,
-                                    }}
-                                    className="text-muted-foreground text-lg"
+                                    transition={{ duration: 0.8 }}
+                                />
+                            );
+                        })}
+
+                        {/* ── Path from buffer to destination ── */}
+                        <motion.path
+                            d={destPath}
+                            fill="none"
+                            stroke={
+                                phase === "disbursing" || phase === "complete"
+                                    ? "#0ba4db"
+                                    : "var(--color-border)"
+                            }
+                            strokeWidth="1.5"
+                            strokeDasharray={disbursing ? "6 4" : "4 4"}
+                            initial={{ opacity: 0.3 }}
+                            animate={{
+                                opacity: phase === "disbursing" || phase === "complete" ? 1 : 0.3,
+                            }}
+                            transition={{ duration: 0.5 }}
+                        />
+
+                        {/* ── Animated packets along source paths (sending) ── */}
+                        {activeSources.map((source, i) => {
+                            const status = legStatuses[i];
+                            if (status !== "sending") return null;
+
+                            const color = source.account.color;
+                            const durationSec = parallel ? (3.0 + i * 1.2) : 3.0;
+
+                            return (
+                                <g key={`packet-group-${i}`}>
+                                    <motion.circle
+                                        r="5"
+                                        fill={color}
+                                        initial={{ offsetDistance: "0%" }}
+                                        animate={{ offsetDistance: "100%" }}
+                                        transition={{ duration: durationSec, ease: "linear", repeat: 0 }}
+                                        style={{ offsetPath: `path("${getSourcePath(i)}")` }}
+                                    />
+                                    <motion.text
+                                        fontSize="10"
+                                        fontWeight="700"
+                                        fill={color}
+                                        dy="-12"
+                                        textAnchor="middle"
+                                        initial={{ offsetDistance: "0%", opacity: 0 }}
+                                        animate={{ offsetDistance: "100%", opacity: [0, 1, 1, 0] }}
+                                        transition={{ duration: durationSec, ease: "linear", repeat: 0 }}
+                                        style={{ offsetPath: `path("${getSourcePath(i)}")` }}
+                                    >
+                                        {formatNaira(source.amount)}
+                                    </motion.text>
+                                </g>
+                            );
+                        })}
+
+                        {/* ── Refund packets (reverse along source paths — refunding) ── */}
+                        {activeSources.map((source, i) => {
+                            const status = legStatuses[i];
+                            if (status !== "refunding") return null;
+                            const color = "#f59e0b";
+                            const label = "↩ refund";
+                            return (
+                                <g key={`refund-group-${i}`}>
+                                    <motion.circle
+                                        r="5"
+                                        fill={color}
+                                        initial={{ offsetDistance: "100%" }}
+                                        animate={{ offsetDistance: "0%" }}
+                                        transition={{ duration: 3.0, repeat: 0, ease: "linear" }}
+                                        style={{ offsetPath: `path("${getSourcePath(i)}")` }}
+                                    />
+                                    <motion.text
+                                        fontSize="10"
+                                        fontWeight="700"
+                                        fill={color}
+                                        dy="-12"
+                                        textAnchor="middle"
+                                        initial={{ offsetDistance: "100%", opacity: 0 }}
+                                        animate={{ offsetDistance: "0%", opacity: [0, 1, 1, 0] }}
+                                        transition={{ duration: 3.0, repeat: 0, ease: "linear" }}
+                                        style={{ offsetPath: `path("${getSourcePath(i)}")` }}
+                                    >
+                                        {label}
+                                    </motion.text>
+                                </g>
+                            );
+                        })}
+
+                        {/* ── Disbursement packet ── */}
+                        {disbursing && (
+                            <g>
+                                <motion.circle
+                                    r="6"
+                                    fill="#0ba4db"
+                                    initial={{ offsetDistance: "0%" }}
+                                    animate={{ offsetDistance: "100%" }}
+                                    transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                                    style={{ offsetPath: `path("${destPath}")` }}
+                                />
+                                <motion.text
+                                    fontSize="10"
+                                    fontWeight="700"
+                                    fill="#0ba4db"
+                                    dy="-12"
+                                    textAnchor="middle"
+                                    initial={{ offsetDistance: "0%", opacity: 0 }}
+                                    animate={{ offsetDistance: "100%", opacity: [0, 1, 1, 0] }}
+                                    transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                                    style={{ offsetPath: `path("${destPath}")` }}
                                 >
-                                    →
-                                </motion.div>
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
+                                    {formatNaira(targetAmount)}
+                                </motion.text>
+                            </g>
+                        )}
 
-                                {/* Animated money packets traveling → */}
-                                <AnimatePresence>
-                                    {packets
-                                        .filter((p) => p.direction === "to-buffer")
-                                        .map((p) => (
-                                            <motion.div
-                                                key={p.id}
-                                                className="absolute top-1/2 -translate-y-1/2 flex items-center gap-1"
-                                                initial={{ left: "0%", opacity: 0 }}
-                                                animate={{ left: "85%", opacity: [0, 1, 1, 0.5] }}
-                                                transition={{
-                                                    duration: 2,
-                                                    repeat: Infinity,
-                                                    ease: "linear",
-                                                }}
-                                            >
-                                                <span
-                                                    className="w-3 h-3 rounded-full"
-                                                    style={{ backgroundColor: p.color }}
-                                                />
-                                                <span
-                                                    className="text-[10px] font-bold whitespace-nowrap"
-                                                    style={{ color: p.color }}
-                                                >
-                                                    {formatNaira(activeSources[p.legIndex]?.amount || 0)}
-                                                </span>
-                                            </motion.div>
-                                        ))}
-                                </AnimatePresence>
-
-                                {/* Refund packets traveling ← */}
-                                <AnimatePresence>
-                                    {packets
-                                        .filter((p) => p.direction === "refund")
-                                        .map((p) => (
-                                            <motion.div
-                                                key={p.id}
-                                                className="absolute top-1/2 -translate-y-1/2 flex items-center gap-1"
-                                                initial={{ left: "85%", opacity: 0 }}
-                                                animate={{ left: "0%", opacity: [0, 1, 1, 0.5] }}
-                                                transition={{
-                                                    duration: 2,
-                                                    repeat: Infinity,
-                                                    ease: "linear",
-                                                }}
-                                            >
-                                                <span
-                                                    className="w-3 h-3 rounded-full"
-                                                    style={{ backgroundColor: p.color }}
-                                                />
-                                                <span className="text-[10px] font-bold text-amber-600 whitespace-nowrap">
-                                                    ↩ refund
-                                                </span>
-                                            </motion.div>
-                                        ))}
-                                </AnimatePresence>
-                            </div>
-
-                            {/* VIRTUAL ACCOUNT */}
-                            <motion.div
-                                className={`relative w-40 h-40 rounded-full border-[3px] flex flex-col items-center justify-center overflow-hidden transition-colors ${getBufferBorderColor()}`}
-                                animate={{
-                                    scale:
-                                        phase === "buffer_full" || phase === "complete" ? [1, 1.05, 1] : 1,
-                                }}
-                                transition={{ duration: 0.6 }}
-                            >
-                                {/* Stacked bank-colored fill layers */}
-                                {bufferColors.map((bc, idx) => {
-                                    const prevHeight = bufferColors
-                                        .slice(0, idx)
-                                        .reduce((sum, b) => sum + (targetAmount > 0 ? (b.amount / targetAmount) * 100 : 0), 0);
-                                    const thisHeight = targetAmount > 0 ? (bc.amount / targetAmount) * 100 : 0;
-                                    return (
+                        {/* ── Source nodes (Cards via foreignObject) ── */}
+                        {activeSources.map((source, i) => {
+                            const pos = sourcePositions[i];
+                            const status = legStatuses[i] || "pending";
+                            const isSending = status === "sending";
+                            const borderColor = isSending
+                                ? source.account.color
+                                : status === "done" ? "#16a34a"
+                                    : status === "failed" ? "#ef4444"
+                                        : "#e5e7eb";
+                            return (
+                                <g key={`src-${i}`}>
+                                    <foreignObject
+                                        x={pos.x - cardW / 2 - 4}
+                                        y={pos.y - cardH / 2 - 4}
+                                        width={cardW + 8}
+                                        height={cardH + 8}
+                                        style={{ overflow: "visible" }}
+                                    >
                                         <motion.div
+                                            className="flex flex-row items-center gap-3 px-3.5 py-2.5 rounded-xl bg-white"
+                                            style={{ border: `1.5px solid ${borderColor}`, width: cardW, height: cardH, margin: 4 }}
+                                            animate={{ scale: isSending ? [1, 1.02, 1] : 1 }}
+                                            transition={{ duration: 1, repeat: isSending ? Infinity : 0 }}
+                                        >
+                                            <span
+                                                className="w-3 h-3 rounded-full shrink-0"
+                                                style={{ backgroundColor: source.account.color }}
+                                            />
+                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                <p className="text-[12px] font-semibold truncate leading-tight text-foreground">
+                                                    {source.account.name}
+                                                </p>
+                                                <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+                                                    {formatNaira(source.amount)}
+                                                </p>
+                                            </div>
+                                        </motion.div>
+                                    </foreignObject>
+
+                                    {/* Status badge below card */}
+                                    {status !== "pending" && (
+                                        <foreignObject
+                                            x={pos.x - cardW / 2}
+                                            y={pos.y + cardH / 2 + 2}
+                                            width={cardW}
+                                            height="18"
+                                        >
+                                            <p className="text-[10px] font-semibold text-center" style={{ color: getStatusColor(status) }}>
+                                                {getStatusLabel(status)}
+                                            </p>
+                                        </foreignObject>
+                                    )}
+                                </g>
+                            );
+                        })}
+
+                        {/* ── Buffer (Virtual Account) ── */}
+                        <g>
+                            {/* Outer circle */}
+                            <motion.circle
+                                cx={bufX}
+                                cy={bufY}
+                                r={bufR}
+                                fill="white"
+                                stroke={
+                                    phase === "complete" || phase === "buffer_full"
+                                        ? "#16a34a"
+                                        : phase === "leg_failed"
+                                            ? "#ef4444"
+                                            : "#0ba4db"
+                                }
+                                strokeWidth="3"
+                                animate={{
+                                    scale: phase === "buffer_full" || phase === "complete" ? [1, 1.04, 1] : 1,
+                                    x: 0,
+                                }}
+                                transition={{
+                                    duration: 0.6,
+                                }}
+                            />
+
+                            {/* Colored fill layers */}
+                            <g clipPath="url(#bufferClip)">
+                                {bufferColors.map((bc, idx) => {
+                                    const prevH = bufferColors
+                                        .slice(0, idx)
+                                        .reduce((sum, b) => sum + (targetAmount > 0 ? (b.amount / targetAmount) * (bufR * 2) : 0), 0);
+                                    const thisH = targetAmount > 0 ? (bc.amount / targetAmount) * (bufR * 2) : 0;
+                                    return (
+                                        <motion.rect
                                             key={`fill-${idx}`}
-                                            className="absolute left-0 right-0"
-                                            style={{
-                                                bottom: `${prevHeight}%`,
-                                                backgroundColor: `${bc.color}20`,
-                                                borderTop: idx > 0 ? `1px solid ${bc.color}30` : undefined,
-                                            }}
-                                            initial={{ height: "0%" }}
-                                            animate={{ height: `${thisHeight}%` }}
-                                            transition={{ duration: 1, ease: "easeOut" }}
+                                            x={bufX - bufR}
+                                            width={bufR * 2}
+                                            fill={bc.color}
+                                            fillOpacity="0.15"
+                                            initial={{ y: bufY + bufR, height: 0 }}
+                                            animate={{ y: bufY + bufR - prevH - thisH, height: thisH }}
+                                            transition={{ duration: 0.8, ease: "easeOut" }}
                                         />
                                     );
                                 })}
-                                {/* Error / empty state fill */}
-                                {(phase === "leg_failed" || phase === "race_failed") && bufferColors.length === 0 && (
-                                    <div className="absolute bottom-0 left-0 right-0 h-full bg-red-50" />
-                                )}
-                                {phase === "escrow_held" && (
-                                    <div className="absolute bottom-0 left-0 right-0 h-full bg-amber-50" />
-                                )}
+                            </g>
 
-                                {/* Label */}
-                                <div className="relative z-10 text-center">
-                                    <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
-                                        Paystack
-                                    </p>
-                                    <p className="text-lg font-bold mt-0.5">
-                                        {formatNaira(collectedAmount)}
-                                    </p>
-                                    <p className="text-[10px] text-muted-foreground">
-                                        of {formatNaira(targetAmount)}
-                                    </p>
-                                </div>
-                            </motion.div>
+                            {/* Labels — placed well above the circle so they don't clip */}
+                            <text x={bufX} y={bufY - bufR - 20} textAnchor="middle" className="text-[10px] font-bold fill-muted-foreground" style={{ textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                                Paystack
+                            </text>
+                            <text x={bufX} y={bufY - bufR - 6} textAnchor="middle" className="text-[9px] fill-muted-foreground">
+                                Virtual Account
+                            </text>
+                            <text x={bufX} y={bufY + 4} textAnchor="middle" className="text-lg font-bold fill-foreground">
+                                {formatNaira(collectedAmount)}
+                            </text>
+                            <text x={bufX} y={bufY + 24} textAnchor="middle" className="text-[10px] fill-muted-foreground">
+                                of {formatNaira(targetAmount)}
+                            </text>
+                        </g>
 
-                            {/* Arrow from buffer → recipient with packet */}
-                            <div className="flex items-center gap-2 w-full max-w-xs relative">
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
-                                <motion.div
-                                    animate={{
-                                        x: phase === "disbursing" ? [0, 8, 0] : 0,
-                                        opacity: phase === "disbursing" || phase === "complete" ? 1 : 0.3,
-                                    }}
-                                    transition={{
-                                        repeat: phase === "disbursing" ? Infinity : 0,
-                                        duration: 1.5,
-                                    }}
-                                    className="text-muted-foreground text-lg"
-                                >
-                                    →
-                                </motion.div>
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
-
-                                {/* Disbursement packet */}
-                                <AnimatePresence>
-                                    {packets
-                                        .filter((p) => p.direction === "to-recipient")
-                                        .map((p) => (
-                                            <motion.div
-                                                key={p.id}
-                                                className="absolute top-1/2 -translate-y-1/2 flex items-center gap-1"
-                                                initial={{ left: "0%", opacity: 0 }}
-                                                animate={{ left: "85%", opacity: [0, 1, 1, 0.5] }}
-                                                transition={{
-                                                    duration: 2.5,
-                                                    repeat: Infinity,
-                                                    ease: "linear",
-                                                }}
-                                            >
-                                                <span
-                                                    className="w-4 h-4 rounded-full bg-[#0ba4db]"
-                                                />
-                                                <span className="text-[10px] font-bold text-[#0ba4db] whitespace-nowrap">
-                                                    {formatNaira(targetAmount)}
-                                                </span>
-                                            </motion.div>
-                                        ))}
-                                </AnimatePresence>
-                            </div>
-                        </div>
-
-                        {/* RECIPIENT (RIGHT) */}
-                        <div className="shrink-0 w-44">
-                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-3">
-                                Recipient
-                            </p>
-                            <motion.div
-                                className={`px-3 py-3 rounded-lg border transition-all ${phase === "complete"
-                                    ? "border-green-500 bg-green-50"
-                                    : "border-border"
-                                    }`}
-                                animate={{
-                                    scale: phase === "complete" ? [1, 1.03, 1] : 1,
-                                }}
-                                transition={{ duration: 0.5 }}
+                        {/* ── Destination node ── */}
+                        <g>
+                            <foreignObject
+                                x={destX - destCardW / 2 - 4}
+                                y={destY - 48}
+                                width={destCardW + 8}
+                                height="120"
+                                style={{ overflow: "visible" }}
                             >
-                                <p className="text-xs font-semibold">{recipient.name}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                    {recipient.bank} · {recipient.accountNumber}
-                                </p>
-                                {phase === "complete" && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: "auto" }}
-                                        transition={{ delay: 0.3 }}
-                                        className="mt-2 pt-2 border-t border-green-200"
-                                    >
-                                        <p className="text-xs font-bold text-green-600">
-                                            Received {formatNaira(targetAmount)}
-                                        </p>
-                                        <p className="text-[10px] text-green-600/70">
-                                            1 alert · 1 reference
-                                        </p>
-                                    </motion.div>
-                                )}
-                            </motion.div>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* ── Activity Log ── */}
-            <Card>
-                <CardContent className="pt-5 pb-5">
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-3">
-                        Activity Log
-                    </p>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                        <AnimatePresence>
-                            {phase !== "intro" && (
-                                <LogEntry
-                                    key="init"
-                                    text={`Stitch session initiated for ${formatNaira(targetAmount)}`}
-                                    time="0s"
-                                    variant="info"
-                                />
-                            )}
-                            {(phase === "collecting" ||
-                                phase === "leg_progress" ||
-                                phase === "buffer_filling" ||
-                                phase === "buffer_full" ||
-                                phase === "disbursing" ||
-                                phase === "complete" ||
-                                phase === "leg_failed" ||
-                                phase === "refunding" ||
-                                phase === "refund_done" ||
-                                phase === "ghost_arriving" ||
-                                phase === "ghost_reversed" ||
-                                phase === "race_failed" ||
-                                phase === "escrow_held") && (
-                                    <LogEntry
-                                        key="collecting"
-                                        text={`Initiating transfers from ${activeSources.length} source account(s)`}
-                                        time="1s"
-                                        variant="info"
-                                    />
-                                )}
-                            {Object.entries(legStatuses).map(([idx, status]) => {
-                                const i = parseInt(idx);
-                                const source = activeSources[i];
-                                if (!source) return null;
-                                if (status === "sending")
-                                    return (
-                                        <LogEntry
-                                            key={`sending-${i}`}
-                                            text={`${source.account.name}: sending ${formatNaira(source.amount)}...`}
-                                            time=""
-                                            variant="pending"
-                                        />
-                                    );
-                                if (status === "done")
-                                    return (
-                                        <LogEntry
-                                            key={`done-${i}`}
-                                            text={`${source.account.name}: ${formatNaira(source.amount)} received in buffer`}
-                                            time=""
-                                            variant="success"
-                                        />
-                                    );
-                                if (status === "failed")
-                                    return (
-                                        <LogEntry
-                                            key={`fail-${i}`}
-                                            text={`${source.account.name}: transfer failed`}
-                                            time=""
-                                            variant="error"
-                                        />
-                                    );
-                                if (status === "refunding")
-                                    return (
-                                        <LogEntry
-                                            key={`refunding-${i}`}
-                                            text={`${source.account.name}: refunding ${formatNaira(source.amount)}...`}
-                                            time=""
-                                            variant="warning"
-                                        />
-                                    );
-                                if (status === "refunded")
-                                    return (
-                                        <LogEntry
-                                            key={`refunded-${i}`}
-                                            text={`${source.account.name}: ${formatNaira(source.amount)} returned`}
-                                            time=""
-                                            variant="muted"
-                                        />
-                                    );
-                                if (status === "ghost")
-                                    return (
-                                        <LogEntry
-                                            key={`ghost-${i}`}
-                                            text={`${source.account.name}: stale fund detected! Auto-reversing...`}
-                                            time=""
-                                            variant="warning"
-                                        />
-                                    );
-                                return null;
-                            })}
-                            {phase === "buffer_full" && (
-                                <LogEntry
-                                    key="full"
-                                    text={`Buffer full: ${formatNaira(targetAmount)} collected`}
-                                    time=""
-                                    variant="success"
-                                />
-                            )}
-                            {phase === "disbursing" && (
-                                <LogEntry
-                                    key="disburse"
-                                    text={`Disbursing ${formatNaira(targetAmount)} to ${recipient.name}`}
-                                    time=""
-                                    variant="pending"
-                                />
-                            )}
-                            {phase === "complete" && (
-                                <LogEntry
-                                    key="complete"
-                                    text={`Payment complete. ${recipient.name} received ${formatNaira(targetAmount)}.`}
-                                    time=""
-                                    variant="success"
-                                />
-                            )}
-                            {phase === "escrow_held" && (
-                                <LogEntry
-                                    key="escrow"
-                                    text="Refund failed. Funds held in Stitch Escrow. Manual intervention required."
-                                    time=""
-                                    variant="error"
-                                />
-                            )}
-                        </AnimatePresence>
-                    </div>
+                                <div
+                                    className={`flex flex-col justify-center px-4 py-4 rounded-xl bg-white overflow-hidden transition-colors ${phase === "complete" ? "bg-green-50/60" : ""
+                                        }`}
+                                    style={{
+                                        border: `1.5px solid ${phase === "complete" ? "#16a34a" : "#e5e7eb"}`,
+                                        height: 116,
+                                        width: destCardW,
+                                        margin: 4
+                                    }}
+                                >
+                                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest mb-1.5 opacity-80">Recipient</p>
+                                    <p className="text-[13px] font-bold text-foreground truncate leading-tight mb-0.5">{recipient.name}</p>
+                                    <p className="text-[11px] text-muted-foreground truncate leading-tight">{recipient.bank} · ****{recipient.accountNumber.slice(-4)}</p>
+                                    {phase === "complete" && (
+                                        <p className="text-[11px] font-bold text-green-600 mt-2 leading-tight">✓ {formatNaira(targetAmount)} received</p>
+                                    )}
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </svg>
                 </CardContent>
             </Card>
         </div>
-    );
-}
-
-// ── Log Entry component ──────────────────────
-function LogEntry({
-    text,
-    time,
-    variant,
-}: {
-    text: string;
-    time: string;
-    variant: "info" | "success" | "error" | "warning" | "pending" | "muted";
-}) {
-    const dotColor = {
-        info: "bg-blue-400",
-        success: "bg-green-500",
-        error: "bg-red-500",
-        warning: "bg-amber-500",
-        pending: "bg-blue-400 animate-pulse",
-        muted: "bg-muted-foreground/50",
-    }[variant];
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, x: -5 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3 }}
-            className="flex items-start gap-2.5 text-xs"
-        >
-            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${dotColor}`} />
-            <span className="text-muted-foreground leading-relaxed">{text}</span>
-        </motion.div>
     );
 }
