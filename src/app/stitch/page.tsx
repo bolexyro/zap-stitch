@@ -72,7 +72,7 @@ export default function StitchPage() {
                     </div>
                     <p className="text-muted-foreground text-lg">
                         {phase === "form"
-                            ? "Combine funds from multiple accounts into a single payment."
+                            ? "Combine funds from multiple accounts into a single payment without hopping between bank apps"
                             : "Watch your funds flow through the Paystack virtual account."}
                     </p>
                 </motion.div>

@@ -62,7 +62,7 @@ export default function DocsPage() {
                         </p>
                     </motion.section>
 
-                    {/* Section 2: The Buffer Pattern */}
+                    {/* Section 3: The Buffer Pattern */}
                     <motion.section
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -95,6 +95,33 @@ export default function DocsPage() {
                             reconciliation ledger.
                         </p>
                     </motion.section>
+
+                    {/* Section 2: Why Paystack */}
+                    <motion.section
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.25 }}
+                    >
+                        <div className="flex items-center gap-3 mb-4 not-prose">
+                            <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center">
+                                <Shield className="w-5 h-5 text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold">Why Paystack?</h2>
+                        </div>
+                        <p>
+                            Paystack is uniquely positioned to solve this problem beautifully because of two massive advantages:
+                        </p>
+                        <ol>
+                            <li>
+                                <strong>They own Zap:</strong> An app that already lets you send money from any of your bank accounts.
+                            </li>
+                            <li>
+                                <strong>They own Virtual Accounts:</strong> The exact buffer infrastructure needed to make Stitch work natively exists within their systems. It&apos;s a plug-and-play addition to their ecosystem.
+                            </li>
+                        </ol>
+                    </motion.section>
+
+
 
 
 

@@ -137,12 +137,37 @@ export default function StitchForm({ onConfirm }: StitchFormProps) {
             className="max-w-4xl mx-auto flex flex-col md:flex-row gap-8 items-center justify-center"
         >
             {/* Meme Placeholder (Left Side) */}
-            <div className="w-full md:w-1/2 flex flex-col items-center text-center">
+            <div className="w-full md:w-1/2 flex flex-col items-center text-center relative">
+                {/* Sketched curved arrow + annotation */}
+                <div className="absolute top-0 -left-6 md:-left-32 z-10 flex flex-col items-end" style={{ transform: 'rotate(-4deg)' }}>
+                    <p className="text-muted-foreground leading-snug mb-0 text-right font-bold" style={{ fontFamily: 'var(--font-caveat), cursive', fontSize: '1.25rem' }}>
+                        you don&apos;t have to worry<br />about this anymore :)
+                    </p>
+                    <svg width="65" height="65" viewBox="0 0 65 65" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-muted-foreground mr-6 mt-1">
+                        <path
+                            d="M45 5 C 20 15, 5 35, 20 55 C 30 65, 45 65, 60 60"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeDasharray="4 3"
+                            fill="none"
+                        />
+                        <path
+                            d="M50 53 L61 60 L52 67"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            fill="none"
+                        />
+                    </svg>
+                </div>
+
                 <div className="relative rounded-xl overflow-hidden border bg-muted w-full max-w-[280px] mx-auto aspect-[4/5] mb-4 flex items-center justify-center">
                     <img src="/meme.jpeg" alt="how much is adulting dealing with you" className="object-cover w-full h-full shadow-sm" />
                 </div>
                 <p className="text-sm font-medium text-muted-foreground italic tracking-tight max-w-[280px]">
-                    "how much is adulting dealing with you :)"
+                    &quot;how much is adulting dealing with you :)&quot;
                 </p>
             </div>
 
