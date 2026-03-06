@@ -14,7 +14,7 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
-  title: "Stitch — Smart Payment Aggregation",
+  title: "Stitch — Payment Aggregation",
   description:
     "Combine funds from multiple bank accounts into a single outbound payment. A Paystack POC.",
 };

@@ -33,7 +33,7 @@ export default function DashboardPage() {
           </div>
 
           <Button asChild size="lg" className="gap-2.5 rounded-xl px-7 h-12 shrink-0">
-            <Link href="/stitch">
+            <Link href="/">
               <Zap className="w-4 h-4" />
               Start a Stitch
               <ArrowRight className="w-4 h-4" />
